@@ -40,6 +40,13 @@ for i in range(config["train_steps"]):
     print("Train Step: ", i+1)
     trainer.train(agent, env, config["train_record_steps"], config["epochs"])
     avg_rew, win_per = trainer.eval(agent, env, config["eval_record_steps"])
+    if ((i+1) % config["save_steps"]) == 0:
+        print("Saving Model...")
+        agent.save_target_model("target_model_wts_2x32x256.h5")
     print("Average Reward: ", avg_rew)
     print("Win Percentage: ", win_per)
     print('\n')
+
+# agent.load_target_model("target_model_wts_2x32x256.h5")
+# rew, win = trainer.eval(agent, env, config["eval_record_steps"])
+# print(rew, win)

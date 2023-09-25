@@ -9,10 +9,10 @@ false_reward: -50
 env_verbose: False
 
 vocab_size: 28
-embed_size: 128
-num_heads: 16
+embed_size: 256
+num_heads: 32
 key_dim: 2
-base_model_wts: "base_model_wts/base_model_weights_16x128.h5"
+base_model_wts: "base_model_wts/base_model_weights_2x32x256.h5"
 
 gamma : 0.99
 epsilon : 1.0 
@@ -21,9 +21,10 @@ epsilon_max : 1.0
 epsilon_random_frames : 50000
 epsilon_greedy_frames : 1000000.0
 max_memory_length : 100000
-train_record_steps: 400
-eval_record_steps: 50
-batch_size: 4000
-epochs: 30
+train_record_steps: 40
+eval_record_steps: 10
+batch_size: 400
+epochs: 10
 
-train_steps: 10
+train_steps: 150
+save_steps: 10

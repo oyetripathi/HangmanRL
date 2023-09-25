@@ -17,6 +17,7 @@ class Agent(object):
                 base_model_wts = None,
                 attention_axes=(1,2)):
       self.letter_dict = self.build_letter_dict()
+      self.maxlen = maxlen
       self.model = QNetwork(vocab_size=vocab_size, embed_size=embed_size,
                             num_heads=num_heads, key_dim=key_dim, maxlen=maxlen, 
                             base_model_wts=base_model_wts, attention_axes=attention_axes)
@@ -26,14 +27,25 @@ class Agent(object):
       
    def update_target_model(self):
       self.target_model.set_weights(self.model.get_weights())
+   
+   def save_target_model(self, path):
+      self.target_model.save_weights(path)
+
+   def load_target_model(self, path):
+      state, guessed = np.random.rand(200, self.maxlen), np.random.randint(0,2, size=(200, 26))
+      state, guessed = tf.convert_to_tensor(state, dtype=tf.float32), tf.convert_to_tensor(guessed, dtype=tf.bool)
+      self.target_model(state, guessed)
+      self.target_model.load_weights(path)
 
    def select_random_action(self, num):
       return np.random.choice(26, size=num)
+   
    
    def select_action(self, state, guessed):
       action_probs = self.model(state, guessed, training=False)
       action = tf.argmax(action_probs, axis=-1).numpy()
       return action
+   
    
    def action_as_char(self, action):
       return [chr(ord('a')+i) for i in action.tolist()]
@@ -77,17 +89,17 @@ class Trainer(object):
       self.max_memory_length = max_memory_length
 
       self.batch_size = 4
-      self.action_history = None
-      self.state_history = None
-      self.state_next_history = None
-      self.guessed_history = None
-      self.guessed_next_history = None
-      self.rewards_history = None
-      self.done_history = None
+      self.action_history = []
+      self.state_history = []
+      self.state_next_history = []
+      self.guessed_history = []
+      self.guessed_next_history = []
+      self.rewards_history = []
+      self.done_history = []
       self.frame_count = 0
 
       self.loss_function = tf.losses.Huber()
-      self.optimizer = tf.optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
+      self.optimizer = tf.optimizers.Adam()
    
    def store(self, history, new_arr):
       if history is None:
@@ -96,22 +108,23 @@ class Trainer(object):
          return np.append(history, new_arr, axis = 0)
     
    def update_history(self, action, state, guessed, state_next, guessed_next, done, reward):
-      self.action_history = self.store(self.action_history, action)
-      self.state_history = self.store(self.state_history, state)
-      self.state_next_history = self.store(self.state_next_history, state_next)
-      self.guessed_history = self.store(self.guessed_history, guessed)
-      self.guessed_next_history = self.store(self.guessed_next_history, guessed_next)
-      self.done_history = self.store(self.done_history, done)
-      self.rewards_history = self.store(self.rewards_history, reward)
+      self.action_history.append(action)
+      self.state_history.append(state)
+      self.state_next_history.append(state_next)
+      self.guessed_history.append(guessed)
+      self.guessed_next_history.append(guessed_next)
+      self.done_history.append(done)
+      self.rewards_history.append(reward)
 
-      if (self.rewards_history.shape[0] > self.max_memory_length):
-         extra = self.rewards_history.shape[0] -  self.max_memory_length
-         self.action_history = self.action_history[extra:]
-         self.state_history = self.state_history[extra:]
-         self.guessed_history = self.guessed_history[extra:]
-         self.guessed_next_history = self.guessed_next_history[extra:]
-         self.done_history = self.done_history[extra:]
-         self.rewards_history = self.rewards_history[extra:]
+      if (len(self.rewards_history) - self.max_memory_length) > 0:
+         extra = len(self.rewards_history) - self.max_memory_length
+         del self.action_history[:extra]
+         del self.state_history[:extra]
+         del self.guessed_history[:extra]
+         del self.state_next_history[:extra]
+         del self.guessed_next_history[:extra]
+         del self.done_history[:extra]
+         del self.rewards_history[:extra]
 
    def record(self, agent : Agent, env: Hangman):
       (state, guessed) = env.reset()
@@ -135,13 +148,13 @@ class Trainer(object):
 
    def train_step(self, agent : Agent, env: Hangman):
       indices = np.random.choice(range(len(self.done_history)), size=self.batch_size)
-      state_sample = self.state_history[indices]
-      state_next_sample = self.state_next_history[indices]
-      guesssed_sample = self.guessed_history[indices]
-      guesssed_next_sample = self.guessed_next_history[indices]
-      rewards_sample = self.rewards_history[indices]
-      action_sample = self.action_history[indices]
-      done_sample = tf.convert_to_tensor(self.done_history[indices], dtype=tf.float32)
+      state_sample = np.array([self.state_history[i] for i in indices]).reshape(-1, agent.maxlen)
+      state_next_sample = np.array([self.state_next_history[i] for i in indices]).reshape(-1, agent.maxlen)
+      guesssed_sample = np.array([self.guessed_history[i] for i in indices]).reshape(-1, 26)
+      guesssed_next_sample = np.array([self.guessed_next_history[i] for i in indices]).reshape(-1, 26)
+      rewards_sample = np.array([self.rewards_history[i] for i in indices]).ravel()
+      action_sample = np.array([self.action_history[i] for i in indices]).ravel()
+      done_sample = tf.convert_to_tensor(np.array([self.done_history[i] for i in indices]).ravel(), dtype=tf.float32)
 
       future_rewards = agent.target_model(state_next_sample, guesssed_next_sample)
       updated_q_values = rewards_sample + self.gamma * tf.reduce_max(
@@ -163,8 +176,8 @@ class Trainer(object):
          _, _ = self.record(agent, env)
       print("Training Network...")
       for _ in tqdm(range(epochs)):
-         
          self.train_step(agent, env)
+      agent.update_target_model()
 
    def eval(self, agent: Agent, env: Hangman, record_steps=100):
       reward = 0
@@ -183,9 +196,10 @@ class Trainer(object):
 # max_lives = 5
 # num_env = 4
 # env = Hangman(word_src, num_env=num_env, max_lives=max_lives, verbose = True)
-# agent = Agent(vocab_size = 28, maxlen=29,embed_size = 128, num_heads = 16, key_dim = 2,
-#               base_model_wts="base_model_weights_16x128.h5")
+# agent = Agent(vocab_size = 28, maxlen=29,embed_size = 128, num_heads = 16, key_dim = 2)
 # trainer = Trainer()
-# trainer.train(agent, env, record_steps=10, epochs=3)
+# trainer.record(agent, env)
+# trainer.record(agent, env)
+# trainer.train_step(agent, env)
 # rew, wins = trainer.eval(agent, env)
 # print(rew, wins)

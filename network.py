@@ -70,10 +70,16 @@ class BaseModel(tf.keras.Model):
   def __init__(self, vocab_size, maxlen, embed_size, num_heads, key_dim, attention_axes=(1,2)):
     super().__init__()
     self.positional_embedding = PositionalEmbedding(vocab_size, embed_size, maxlen)
-    self.attention_block = SelfAttention(num_heads, key_dim, attention_axes)
+    self.attention_block1 = SelfAttention(num_heads, key_dim, attention_axes)
+    self.feed_forward1 = FeedForward(embed_size=embed_size)
+    self.attention_block2 = SelfAttention(num_heads, key_dim, attention_axes)
+    self.feed_forward2 = FeedForward(embed_size=embed_size)
   def call(self, x):
     x = self.positional_embedding(x)
-    x = self.attention_block(x)
+    x = self.attention_block1(x)
+    x = self.feed_forward1(x)
+    x = self.attention_block2(x)
+    x = self.feed_forward2(x)
     return x
 
 class QNetwork(tf.keras.Model):
@@ -88,17 +94,17 @@ class QNetwork(tf.keras.Model):
     super().__init__()
     self.base_model = BaseModel(vocab_size, maxlen, embed_size, num_heads, key_dim, attention_axes = attention_axes)
     if base_model_wts != None:
-      self.base_model.build(input_shape=(None,29))
+      self.base_model.build(input_shape=(None,maxlen))
       self.base_model.load_weights(base_model_wts)
-    self.feed_forward = FeedForward(embed_size=embed_size)
     self.flat = tf.keras.layers.Flatten()
+    self.dense = tf.keras.layers.Dense(256, activation='relu')
     self.out = tf.keras.layers.Dense(26, activation='linear')
   def call(self, state, guessed):
     #state: (batch_size, maxlen)
     #mask: (batch_size, 26)
     x = self.base_model(state)
-    x = self.feed_forward(x)
     x = self.flat(x)
+    x = self.dense(x)
     x = self.out(x)
     x = tf.math.multiply(x, tf.cast(tf.math.logical_not(guessed), dtype=tf.float32)) #where guessed is true, values should be -inf
     return x
